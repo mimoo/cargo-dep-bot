@@ -13,14 +13,25 @@ async function handle_pr(context: Context) {
   const head_sha = context.payload.pull_request.head.sha;
 
   // github api lies about base sha, so we pull it from the first commit's parent
-  const commits = await context.github.pullRequests.listCommits(context.repo({number: pr_number}));
-  const commit_ref = commits.data[0].sha;
-  const commit = await context.github.repos.getCommit(context.repo({sha: commit_ref}));
-  const base_sha = commit.data.parents[0].sha;
+  const commits = await context.github.pullRequests.listCommits(context.repo({ number: pr_number }));
+  const base_sha = commits.data[0].parents[0].sha;
 
-  const base_lock_params = context.repo({ref: base_sha, path: 'Cargo.lock'});
+  // send a repo dispatch to calibra/mirai-bot in order to run MIRAI on the PR
+  context.github.repos.createDispatchEvent({
+    "owner": "mimoo",
+    "repo": "mirai-bot",
+    "event_type": "new_PR",
+    "client_payload": context.repo({
+      "pull_id": pr_number,
+      "pull_ref": head_sha,
+      "base_ref": base_sha
+    })
+  });
 
-  const head_lock_params = context.repo({ref: head_sha, path: 'Cargo.lock'});
+  //
+  const base_lock_params = context.repo({ ref: base_sha, path: 'Cargo.lock' });
+
+  const head_lock_params = context.repo({ ref: head_sha, path: 'Cargo.lock' });
   const base_content_encoded = await context.github.repos.getContents(base_lock_params);
   const base_content = Buffer.from(base_content_encoded.data.content, 'base64').toString()
   const head_content_encoded = await context.github.repos.getContents(head_lock_params);
@@ -41,15 +52,15 @@ async function handle_pr(context: Context) {
     const body = `This PR made the following dependency changes:\n\n${text}\n`;
 
     // search for and delete any older comments the bot left
-    const comments = await context.github.issues.listComments(context.repo({number: pr_number}));
+    const comments = await context.github.issues.listComments(context.repo({ number: pr_number }));
     for (let comment of comments.data) {
       if (comment.user.login === "cargo-dep-bot[bot]") {
-        await context.github.issues.deleteComment(context.repo({comment_id: comment.id}));
+        await context.github.issues.deleteComment(context.repo({ comment_id: comment.id }));
       }
     }
 
     // report the analysis in a comment
-    await context.github.issues.createComment(context.repo({number: pr_number, body: body}));
+    await context.github.issues.createComment(context.repo({ number: pr_number, body: body }));
   }
 }
 
